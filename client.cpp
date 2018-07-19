@@ -88,6 +88,7 @@ char *get_hostname() {
 
 int port_connection(char *hostname) {
     int sockfd, portno = 51717, n;
+    int ports_to_connect = 16;
     struct sockaddr_in serv_addr;
     struct hostent *server;
 
@@ -108,17 +109,28 @@ int port_connection(char *hostname) {
     bzero((char *) &serv_addr, sizeof(serv_addr));
     serv_addr.sin_family = AF_INET;
     bcopy((char *)server->h_addr, (char *)&serv_addr.sin_addr.s_addr, server->h_length);
-    serv_addr.sin_port = htons(portno);
 
-    if (connect(sockfd, (struct sockaddr *) &serv_addr,sizeof(serv_addr)) < 0)
-        error("ERROR connecting");
+    for(int i = portno; i < portno + ports_to_connect; i++) {
+        serv_addr.sin_port = htons(i);
+
+	if(i != portno)
+	    printf("\n");
+
+	printf("Trying to bind on %i... ", i);
+
+	//SET A TIMER HERE
+        if (connect(sockfd, (struct sockaddr *) &serv_addr,sizeof(serv_addr)) >= 0)
+            break;
+    }
+
+    printf("Bound.\n");
 
     bzero(buffer, 256);
 
-    strcpy(buffer, "CLIENT/");
-    strcat(buffer, get_hostname());
+    strcpy(buffer, get_hostname());
     strcat(buffer, "/");
     strcat(buffer, get_ip());
+    strcat(buffer, "/CLIENT");
 
     n = write(sockfd, buffer, strlen(buffer));
 
