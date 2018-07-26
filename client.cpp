@@ -7,6 +7,94 @@
 #include <netinet/in.h>
 #include <netdb.h>
 #include <ifaddrs.h>
+#include <fcntl.h>
+#include <sys/time.h>
+#include <sys/types.h>
+#include <sys/select.h> 
+
+/*void connect_w_to(s) { 
+  int res; 
+  struct sockaddr_in addr; 
+  long arg; 
+  fd_set myset; 
+  struct timeval tv; 
+  int valopt; 
+  socklen_t lon; 
+  int errno;
+
+  // Create socket 
+  soc = socket(AF_INET, SOCK_STREAM, 0); 
+  if (soc < 0) { 
+     fprintf(stderr, "Error creating socket (%d %s)\n", errno, strerror(errno)); 
+     exit(0); 
+  } 
+
+  addr.sin_family = AF_INET; 
+  addr.sin_port = htons(2000); 
+  addr.sin_addr.s_addr = inet_addr("192.168.0.1"); 
+
+  // Set non-blocking 
+  if( (arg = fcntl(soc, F_GETFL, NULL)) < 0) { 
+     fprintf(stderr, "Error fcntl(..., F_GETFL) (%s)\n", strerror(errno)); 
+     exit(0); 
+  } 
+  arg |= O_NONBLOCK; 
+  if( fcntl(soc, F_SETFL, arg) < 0) { 
+     fprintf(stderr, "Error fcntl(..., F_SETFL) (%s)\n", strerror(errno)); 
+     exit(0); 
+  } 
+  // Trying to connect with timeout 
+  res = connect(soc, (struct sockaddr *)&addr, sizeof(addr)); 
+  if (res < 0) { 
+     if (errno == EINPROGRESS) { 
+        fprintf(stderr, "EINPROGRESS in connect() - selecting\n"); 
+        do { 
+           tv.tv_sec = 15; 
+           tv.tv_usec = 0; 
+           FD_ZERO(&myset); 
+           FD_SET(soc, &myset); 
+           res = select(soc+1, NULL, &myset, NULL, &tv); 
+           if (res < 0 && errno != EINTR) { 
+              fprintf(stderr, "Error connecting %d - %s\n", errno, strerror(errno)); 
+              exit(0); 
+           } 
+           else if (res > 0) { 
+              // Socket selected for write 
+              lon = sizeof(int); 
+              if (getsockopt(soc, SOL_SOCKET, SO_ERROR, (void*)(&valopt), &lon) < 0) { 
+                 fprintf(stderr, "Error in getsockopt() %d - %s\n", errno, strerror(errno)); 
+                 exit(0); 
+              } 
+              // Check the value returned... 
+              if (valopt) { 
+                 fprintf(stderr, "Error in delayed connection() %d - %s\n", valopt, strerror(valopt) ); 
+                 exit(0); 
+              } 
+              break; 
+           } 
+           else { 
+              fprintf(stderr, "Timeout in select() - Cancelling!\n"); 
+              exit(0); 
+           } 
+        } while (1); 
+     } 
+     else { 
+        fprintf(stderr, "Error connecting %d - %s\n", errno, strerror(errno)); 
+        exit(0); 
+     } 
+  } 
+  // Set to blocking mode again... 
+  if( (arg = fcntl(soc, F_GETFL, NULL)) < 0) { 
+     fprintf(stderr, "Error fcntl(..., F_GETFL) (%s)\n", strerror(errno)); 
+     exit(0); 
+  } 
+  arg &= (~O_NONBLOCK); 
+  if( fcntl(soc, F_SETFL, arg) < 0) { 
+     fprintf(stderr, "Error fcntl(..., F_SETFL) (%s)\n", strerror(errno)); 
+     exit(0); 
+  } 
+  // I hope that is all 
+}*/
 
 void error(const char *msg) {
     perror(msg);
@@ -94,7 +182,7 @@ int port_connection(char *hostname) {
 
     char buffer[256];
 
-    sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    sockfd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
 
     if (sockfd < 0)
         error("ERROR opening socket");
@@ -109,19 +197,30 @@ int port_connection(char *hostname) {
     bzero((char *) &serv_addr, sizeof(serv_addr));
     serv_addr.sin_family = AF_INET;
     bcopy((char *)server->h_addr, (char *)&serv_addr.sin_addr.s_addr, server->h_length);
+    serv_addr.sin_port = htons(portno);
+
+    /*int connresult;
 
     for(int i = portno; i < portno + ports_to_connect; i++) {
         serv_addr.sin_port = htons(i);
 
-	if(i != portno)
-	    printf("\n");
+	    if(i != portno)
+	        printf("\n");
 
-	printf("Trying to bind on %i... ", i);
+	    printf("Trying to bind on %i... ", i);
 
-	//SET A TIMER HERE
-        if (connect(sockfd, (struct sockaddr *) &serv_addr,sizeof(serv_addr)) >= 0)
-            break;
-    }
+	    //SET A TIMER HERE
+        connresult = connect(sockfd, (struct sockaddr *) &serv_addr,sizeof(serv_addr));
+
+        if(connresult != EINPROGRESS && connresult != 0)
+            error("Couldn't connect :(");
+            
+        while(sockfd)
+    }*/
+
+    connect(sockfd, (struct sockaddr *) &serv_addr,sizeof(serv_addr));
+
+
 
     printf("Bound.\n");
 
@@ -155,9 +254,11 @@ int main(int argc, char *argv[]) {
         return 0;
     }
 
-    int sockfd, portno = port_connection(argv[1]), n;
+    //int sockfd, portno = port_connection(argv[1]), n;
     struct sockaddr_in serv_addr;
     struct hostent *server;
+
+    int sockfd, portno = atoi(argv[2]), n;
 
     printf("Port: %d\n-----\n", portno);
 
