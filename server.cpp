@@ -7,10 +7,13 @@
 #include <netinet/in.h>
 #include <netdb.h>
 #include <ifaddrs.h>
+#include <sstream>
+#include <curlpp/cURLpp.hpp>
+#include <curlpp/Options.hpp>
 
 void error(const char *msg) {
-    perror(msg);
-    exit(0);
+    fprintf(stderr, msg);
+    exit(1);
 }
 
 char *get_ip() {
@@ -86,75 +89,36 @@ char *get_hostname() {
     return hostname;
 }
 
-int port_connection(char *hostname) {
-    int sockfd, portno = 51717, n;
-    struct sockaddr_in serv_addr;
-    struct hostent *server;
+int get_port(const char* host, const char* hostname, const char* ip, const char* role) {
+    char* url = (char*) malloc(sizeof(char) * 256);
+    curlpp::Cleanup cu;
+    std::ostringstream os;
 
-    char buffer[256];
+    sprintf(url, "http://%s:51000/?ip=%s&name=%s&role=%s", host, ip, hostname, role);
 
-    sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    os << curlpp::options::Url(std::string(url));
 
-    if (sockfd < 0)
-        error("ERROR opening socket");
-
-    server = gethostbyname(hostname);
-
-    if (server == NULL) {
-        fprintf(stderr, "ERROR, no such host\n");
-        exit(0);
-    }
-
-    bzero((char *) &serv_addr, sizeof(serv_addr));
-    serv_addr.sin_family = AF_INET;
-    bcopy((char *)server->h_addr, (char *)&serv_addr.sin_addr.s_addr, server->h_length);
-    serv_addr.sin_port = htons(portno);
-
-    if (connect(sockfd, (struct sockaddr *) &serv_addr,sizeof(serv_addr)) < 0)
-        error("ERROR connecting");
-
-    bzero(buffer, 256);
-
-    strcpy(buffer, "SERVER/");
-    strcat(buffer, get_hostname());
-    strcat(buffer, "/");
-    strcat(buffer, get_ip());
-
-    n = write(sockfd, buffer, strlen(buffer));
-
-    if (n < 0)
-        error("ERROR writing to socket");
-
-    bzero(buffer, 256);
-    n = read(sockfd, buffer, 255);
-
-    if (n < 0)
-        error("ERROR reading from socket");
-
-    close(sockfd);
-
-    return atoi(buffer);
+    return atoi(os.str().c_str());
 }
 
 int main(int argc, char *argv[]) {
-    if(argc < 2) {
-        printf("%s\n", "Hostname not specified.");
+    if(argc < 2)
+        error("Oh shoot, it looks like you didn't specify a hostname.\n");
 
-        return 0;
-    }
-
-    int sockfd, newsockfd, portno = port_connection(argv[1]);
+    int sockfd, newsockfd, portno;
     socklen_t clilen;
     char buffer[256];
     struct sockaddr_in serv_addr, cli_addr;
     int n;
+
+    portno = get_port(argv[1], get_hostname(), get_ip(), "SERVER");
 
     printf("Port: %d\n-----\n", portno);
 
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
 
     if (sockfd < 0)
-        error("ERROR opening socket");
+        error("There was a problem while opening the socket :(\n");
 
     bzero((char *) &serv_addr, sizeof(serv_addr));
 
@@ -163,7 +127,7 @@ int main(int argc, char *argv[]) {
     serv_addr.sin_port = htons(portno);
 
     if (bind(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0)
-        error("ERROR on binding");
+        error("There was a problem while binding to the socket :(\n");
 
     listen(sockfd, 5);
 
@@ -171,26 +135,27 @@ int main(int argc, char *argv[]) {
     newsockfd = accept(sockfd, (struct sockaddr *) &cli_addr, &clilen);
 
     if (newsockfd < 0)
-        error("ERROR on accept");
+        error("Looks like the other side of the connection didn't want to connect after all!\n");
 
     bzero(buffer, 256);
     n = read(newsockfd, buffer, 255);
+
+    if (n < 0)
+        error("There was an error while reading from socket :(\n");
 
     while(n > 0) {
         printf("%s", buffer);
         n = write(newsockfd, "RECV", 18);
 
-        if (n < 0) {
-            error("ERROR writing to socket");
-            break;
-        }
+        if (n < 0)
+            error("There was an error while writing to socket :(\n");
 
         bzero(buffer, 256);
         n = read(newsockfd, buffer, 255);
-    }
 
-    if (n < 0)
-        error("ERROR reading from socket");
+        if (n < 0)
+            error("There was an error while reading from socket :(\n");
+    }
 
     close(newsockfd);
     close(sockfd);

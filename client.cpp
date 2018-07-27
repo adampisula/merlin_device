@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <string>
 #include <string.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -10,98 +11,17 @@
 #include <fcntl.h>
 #include <sys/time.h>
 #include <sys/types.h>
-#include <sys/select.h> 
-
-/*void connect_w_to(s) { 
-  int res; 
-  struct sockaddr_in addr; 
-  long arg; 
-  fd_set myset; 
-  struct timeval tv; 
-  int valopt; 
-  socklen_t lon; 
-  int errno;
-
-  // Create socket 
-  soc = socket(AF_INET, SOCK_STREAM, 0); 
-  if (soc < 0) { 
-     fprintf(stderr, "Error creating socket (%d %s)\n", errno, strerror(errno)); 
-     exit(0); 
-  } 
-
-  addr.sin_family = AF_INET; 
-  addr.sin_port = htons(2000); 
-  addr.sin_addr.s_addr = inet_addr("192.168.0.1"); 
-
-  // Set non-blocking 
-  if( (arg = fcntl(soc, F_GETFL, NULL)) < 0) { 
-     fprintf(stderr, "Error fcntl(..., F_GETFL) (%s)\n", strerror(errno)); 
-     exit(0); 
-  } 
-  arg |= O_NONBLOCK; 
-  if( fcntl(soc, F_SETFL, arg) < 0) { 
-     fprintf(stderr, "Error fcntl(..., F_SETFL) (%s)\n", strerror(errno)); 
-     exit(0); 
-  } 
-  // Trying to connect with timeout 
-  res = connect(soc, (struct sockaddr *)&addr, sizeof(addr)); 
-  if (res < 0) { 
-     if (errno == EINPROGRESS) { 
-        fprintf(stderr, "EINPROGRESS in connect() - selecting\n"); 
-        do { 
-           tv.tv_sec = 15; 
-           tv.tv_usec = 0; 
-           FD_ZERO(&myset); 
-           FD_SET(soc, &myset); 
-           res = select(soc+1, NULL, &myset, NULL, &tv); 
-           if (res < 0 && errno != EINTR) { 
-              fprintf(stderr, "Error connecting %d - %s\n", errno, strerror(errno)); 
-              exit(0); 
-           } 
-           else if (res > 0) { 
-              // Socket selected for write 
-              lon = sizeof(int); 
-              if (getsockopt(soc, SOL_SOCKET, SO_ERROR, (void*)(&valopt), &lon) < 0) { 
-                 fprintf(stderr, "Error in getsockopt() %d - %s\n", errno, strerror(errno)); 
-                 exit(0); 
-              } 
-              // Check the value returned... 
-              if (valopt) { 
-                 fprintf(stderr, "Error in delayed connection() %d - %s\n", valopt, strerror(valopt) ); 
-                 exit(0); 
-              } 
-              break; 
-           } 
-           else { 
-              fprintf(stderr, "Timeout in select() - Cancelling!\n"); 
-              exit(0); 
-           } 
-        } while (1); 
-     } 
-     else { 
-        fprintf(stderr, "Error connecting %d - %s\n", errno, strerror(errno)); 
-        exit(0); 
-     } 
-  } 
-  // Set to blocking mode again... 
-  if( (arg = fcntl(soc, F_GETFL, NULL)) < 0) { 
-     fprintf(stderr, "Error fcntl(..., F_GETFL) (%s)\n", strerror(errno)); 
-     exit(0); 
-  } 
-  arg &= (~O_NONBLOCK); 
-  if( fcntl(soc, F_SETFL, arg) < 0) { 
-     fprintf(stderr, "Error fcntl(..., F_SETFL) (%s)\n", strerror(errno)); 
-     exit(0); 
-  } 
-  // I hope that is all 
-}*/
+#include <sys/select.h>
+#include <sstream>
+#include <curlpp/cURLpp.hpp>
+#include <curlpp/Options.hpp>
 
 void error(const char *msg) {
-    perror(msg);
-    exit(0);
+    fprintf(stderr, msg);
+    exit(1);
 }
 
-char *get_ip() {
+char* get_ip() {
     FILE *f;
     char line[100] , *p , *c;
 
@@ -131,10 +51,7 @@ char *get_ip() {
     char *ret = (char*) malloc(NI_MAXHOST * sizeof(char));
 
     if (getifaddrs(&ifaddr) == -1)
-    {
-        perror("getifaddrs");
-        exit(EXIT_FAILURE);
-    }
+        error("Couldn't get what your IP is :o\n");
 
     for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next)
     {
@@ -152,10 +69,7 @@ char *get_ip() {
                 s = getnameinfo( ifa->ifa_addr, (family == AF_INET) ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6) , host , NI_MAXHOST , NULL , 0 , NI_NUMERICHOST);
 
                 if (s != 0)
-                {
-                    printf("getnameinfo() failed: %s\n", gai_strerror(s));
-                    exit(EXIT_FAILURE);
-                }
+                    error("Function called 'getnameinfo', but I too don't know why :/\n");
 
                 sprintf(ret, "%s", host);
             }
@@ -167,98 +81,34 @@ char *get_ip() {
     return ret;
 }
 
-char *get_hostname() {
+char* get_hostname() {
     char *hostname = (char*) malloc(64 * sizeof(char));
     gethostname(hostname, 64);
 
     return hostname;
 }
 
-int port_connection(char *hostname) {
-    int sockfd, portno = 51717, n;
-    int ports_to_connect = 16;
-    struct sockaddr_in serv_addr;
-    struct hostent *server;
+int get_port(const char* host, const char* hostname, const char* ip, const char* role) {
+    char* url = (char*) malloc(sizeof(char) * 256);
+    curlpp::Cleanup cu;
+    std::ostringstream os;
 
-    char buffer[256];
+    sprintf(url, "http://%s:51000/?ip=%s&name=%s&role=%s", host, ip, hostname, role);
 
-    sockfd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
+    os << curlpp::options::Url(std::string(url));
 
-    if (sockfd < 0)
-        error("ERROR opening socket");
-
-    server = gethostbyname(hostname);
-
-    if (server == NULL) {
-        fprintf(stderr, "ERROR, no such host\n");
-        exit(0);
-    }
-
-    bzero((char *) &serv_addr, sizeof(serv_addr));
-    serv_addr.sin_family = AF_INET;
-    bcopy((char *)server->h_addr, (char *)&serv_addr.sin_addr.s_addr, server->h_length);
-    serv_addr.sin_port = htons(portno);
-
-    /*int connresult;
-
-    for(int i = portno; i < portno + ports_to_connect; i++) {
-        serv_addr.sin_port = htons(i);
-
-	    if(i != portno)
-	        printf("\n");
-
-	    printf("Trying to bind on %i... ", i);
-
-	    //SET A TIMER HERE
-        connresult = connect(sockfd, (struct sockaddr *) &serv_addr,sizeof(serv_addr));
-
-        if(connresult != EINPROGRESS && connresult != 0)
-            error("Couldn't connect :(");
-            
-        while(sockfd)
-    }*/
-
-    connect(sockfd, (struct sockaddr *) &serv_addr,sizeof(serv_addr));
-
-
-
-    printf("Bound.\n");
-
-    bzero(buffer, 256);
-
-    strcpy(buffer, get_hostname());
-    strcat(buffer, "/");
-    strcat(buffer, get_ip());
-    strcat(buffer, "/CLIENT");
-
-    n = write(sockfd, buffer, strlen(buffer));
-
-    if (n < 0)
-        error("ERROR writing to socket");
-
-    bzero(buffer, 256);
-    n = read(sockfd, buffer, 255);
-
-    if (n < 0)
-        error("ERROR reading from socket");
-
-    close(sockfd);
-
-    return atoi(buffer);
+    return atoi(os.str().c_str());
 }
 
 int main(int argc, char *argv[]) {
-    if(argc < 2) {
-        printf("%s\n", "Hostname not specified.");
+    if(argc < 2)
+        error("Oh shoot, it looks like you didn't specify a hostname.\n");
 
-        return 0;
-    }
-
-    //int sockfd, portno = port_connection(argv[1]), n;
+    int sockfd, portno, n;
     struct sockaddr_in serv_addr;
     struct hostent *server;
 
-    int sockfd, portno = atoi(argv[2]), n;
+    portno = get_port(argv[1], get_hostname(), get_ip(), "CLIENT");
 
     printf("Port: %d\n-----\n", portno);
 
@@ -267,14 +117,12 @@ int main(int argc, char *argv[]) {
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
 
     if (sockfd < 0)
-        error("ERROR opening socket");
+        error("There was a problem while opening the socket :(\n");
 
     server = gethostbyname(argv[1]);
 
-    if (server == NULL) {
-        fprintf(stderr,"ERROR, no such host\n");
-        exit(0);
-    }
+    if (server == NULL)
+        error("Apparently there's no such host :^(\n");
 
     bzero((char *) &serv_addr, sizeof(serv_addr));
     serv_addr.sin_family = AF_INET;
@@ -284,7 +132,9 @@ int main(int argc, char *argv[]) {
     usleep(750 * 1000);
 
     if (connect(sockfd,(struct sockaddr *) &serv_addr,sizeof(serv_addr)) < 0)
-        error("ERROR connecting");
+        error("Beep boop, we couldn't connect to given host :(\n");
+
+    n = 1;
 
     while(n > 0) {
         bzero(buffer, 256);
@@ -293,13 +143,13 @@ int main(int argc, char *argv[]) {
         n = write(sockfd, buffer, strlen(buffer));
 
         if (n < 0)
-            error("ERROR writing to socket");
+            error("There was an error while writing to socket :(\n");
 
         bzero(buffer, 256);
         n = read(sockfd, buffer, 255);
 
         if (n < 0)
-            error("ERROR reading from socket");
+            error("There was an error while reading from socket :(\n");
 
         printf("\t%s\n", buffer);
     }
